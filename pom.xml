@@ -42,7 +42,7 @@
 
         <air.java.version>1.8.0-151</air.java.version>
         <air.maven.version>3.3.9</air.maven.version>
-
+        <dep.project13.version>2.2.4</dep.project13.version>
         <dep.antlr.version>4.7.1</dep.antlr.version>
         <dep.airlift.version>0.178</dep.airlift.version>
         <dep.packaging.version>${dep.airlift.version}</dep.packaging.version>
@@ -1111,6 +1111,17 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>pl.project13.maven</groupId>
+                    <artifactId>git-commit-id-plugin</artifactId>
+                    <version>${dep.project13.version}</version>
+                    <configuration>
+                        <dateFormat>yyyy-MM-dd'T'HH:mm:ssZZ</dateFormat>
+                        <gitDescribe>
+                            <tags>true</tags>
+                        </gitDescribe>
+                    </configuration>
+                </plugin>
                 <plugin>
                     <groupId>org.antlr</groupId>
                     <artifactId>antlr4-maven-plugin</artifactId>
