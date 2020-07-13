@@ -13,9 +13,10 @@
  */
 package com.facebook.presto.sql.planner.plan;
 
+import com.facebook.presto.spi.plan.OrderingScheme;
+import com.facebook.presto.spi.plan.PlanNode;
 import com.facebook.presto.spi.plan.PlanNodeId;
-import com.facebook.presto.sql.planner.OrderingScheme;
-import com.facebook.presto.sql.planner.Symbol;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
@@ -30,11 +31,13 @@ public class SortNode
 {
     private final PlanNode source;
     private final OrderingScheme orderingScheme;
+    private final boolean isPartial;
 
     @JsonCreator
     public SortNode(@JsonProperty("id") PlanNodeId id,
             @JsonProperty("source") PlanNode source,
-            @JsonProperty("orderingScheme") OrderingScheme orderingScheme)
+            @JsonProperty("orderingScheme") OrderingScheme orderingScheme,
+            @JsonProperty("isPartial") boolean isPartial)
     {
         super(id);
 
@@ -43,6 +46,7 @@ public class SortNode
 
         this.source = source;
         this.orderingScheme = orderingScheme;
+        this.isPartial = isPartial;
     }
 
     @Override
@@ -58,15 +62,21 @@ public class SortNode
     }
 
     @Override
-    public List<Symbol> getOutputSymbols()
+    public List<VariableReferenceExpression> getOutputVariables()
     {
-        return source.getOutputSymbols();
+        return source.getOutputVariables();
     }
 
     @JsonProperty("orderingScheme")
     public OrderingScheme getOrderingScheme()
     {
         return orderingScheme;
+    }
+
+    @JsonProperty("isPartial")
+    public boolean isPartial()
+    {
+        return isPartial;
     }
 
     @Override
@@ -78,6 +88,6 @@ public class SortNode
     @Override
     public PlanNode replaceChildren(List<PlanNode> newChildren)
     {
-        return new SortNode(getId(), Iterables.getOnlyElement(newChildren), orderingScheme);
+        return new SortNode(getId(), Iterables.getOnlyElement(newChildren), orderingScheme, isPartial);
     }
 }

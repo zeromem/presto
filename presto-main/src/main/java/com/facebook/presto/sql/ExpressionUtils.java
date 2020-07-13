@@ -13,9 +13,10 @@
  */
 package com.facebook.presto.sql;
 
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.sql.planner.ExpressionDeterminismEvaluator;
-import com.facebook.presto.sql.planner.Symbol;
-import com.facebook.presto.sql.planner.SymbolsExtractor;
+import com.facebook.presto.sql.planner.TypeProvider;
+import com.facebook.presto.sql.planner.VariablesExtractor;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.ExpressionRewriter;
@@ -251,31 +252,24 @@ public final class ExpressionUtils
         return combineConjuncts(conjuncts);
     }
 
-    public static boolean referencesAny(Expression expression, Collection<Symbol> variables)
-    {
-        Set<Symbol> references = SymbolsExtractor.extractUnique(expression);
-
-        return variables.stream().anyMatch(references::contains);
-    }
-
-    public static Function<Expression, Expression> expressionOrNullSymbols(final Predicate<Symbol>... nullSymbolScopes)
+    public static Function<Expression, Expression> expressionOrNullVariables(TypeProvider types, final Predicate<VariableReferenceExpression>... nullVariableScopes)
     {
         return expression -> {
             ImmutableList.Builder<Expression> resultDisjunct = ImmutableList.builder();
             resultDisjunct.add(expression);
 
-            for (Predicate<Symbol> nullSymbolScope : nullSymbolScopes) {
-                List<Symbol> symbols = SymbolsExtractor.extractUnique(expression).stream()
-                        .filter(nullSymbolScope)
+            for (Predicate<VariableReferenceExpression> nullVariableScope : nullVariableScopes) {
+                List<VariableReferenceExpression> variables = VariablesExtractor.extractUnique(expression, types).stream()
+                        .filter(nullVariableScope)
                         .collect(toImmutableList());
 
-                if (Iterables.isEmpty(symbols)) {
+                if (Iterables.isEmpty(variables)) {
                     continue;
                 }
 
                 ImmutableList.Builder<Expression> nullConjuncts = ImmutableList.builder();
-                for (Symbol symbol : symbols) {
-                    nullConjuncts.add(new IsNullPredicate(symbol.toSymbolReference()));
+                for (VariableReferenceExpression variable : variables) {
+                    nullConjuncts.add(new IsNullPredicate(new SymbolReference(variable.getName())));
                 }
 
                 resultDisjunct.add(and(nullConjuncts.build()));

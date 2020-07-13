@@ -13,9 +13,9 @@
  */
 package com.facebook.presto.split;
 
+import com.facebook.presto.common.Page;
+import com.facebook.presto.common.block.Block;
 import com.facebook.presto.spi.ConnectorPageSource;
-import com.facebook.presto.spi.Page;
-import com.facebook.presto.spi.block.Block;
 import com.google.common.primitives.Ints;
 
 import java.io.IOException;
@@ -40,6 +40,12 @@ public class MappedPageSource
     public long getCompletedBytes()
     {
         return delegate.getCompletedBytes();
+    }
+
+    @Override
+    public long getCompletedPositions()
+    {
+        return delegate.getCompletedPositions();
     }
 
     @Override

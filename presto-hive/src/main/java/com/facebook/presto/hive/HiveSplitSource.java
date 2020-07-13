@@ -13,23 +13,21 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.airlift.log.Logger;
+import com.facebook.airlift.stats.CounterStat;
 import com.facebook.presto.hive.InternalHiveSplit.InternalHiveBlock;
 import com.facebook.presto.hive.util.AsyncQueue;
 import com.facebook.presto.hive.util.AsyncQueue.BorrowResult;
-import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.connector.ConnectorPartitionHandle;
-import com.facebook.presto.spi.predicate.TupleDomain;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-import io.airlift.log.Logger;
-import io.airlift.stats.CounterStat;
 import io.airlift.units.DataSize;
 
 import javax.annotation.concurrent.GuardedBy;
@@ -39,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,6 +49,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import static com.facebook.airlift.concurrent.MoreFutures.failedFuture;
+import static com.facebook.airlift.concurrent.MoreFutures.toCompletableFuture;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_EXCEEDED_SPLIT_BUFFERING_LIMIT;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_FILE_NOT_FOUND;
 import static com.facebook.presto.hive.HiveErrorCode.HIVE_UNKNOWN_ERROR;
@@ -63,14 +64,10 @@ import static com.facebook.presto.spi.connector.NotPartitionedPartitionHandle.NO
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static com.google.common.collect.Maps.transformValues;
 import static com.google.common.util.concurrent.Futures.immediateFuture;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
-import static io.airlift.concurrent.MoreFutures.failedFuture;
-import static io.airlift.concurrent.MoreFutures.toCompletableFuture;
 import static io.airlift.units.DataSize.succinctBytes;
 import static java.lang.Math.min;
-import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
@@ -82,10 +79,11 @@ class HiveSplitSource
     private final String queryId;
     private final String databaseName;
     private final String tableName;
-    private final TupleDomain<? extends ColumnHandle> compactEffectivePredicate;
+    private final CacheQuotaScope cacheQuotaScope;
+    private final Optional<DataSize> configuredCacheQuota;
     private final PerBucket queues;
     private final AtomicInteger bufferedInternalSplitCount = new AtomicInteger();
-    private final int maxOutstandingSplitsBytes;
+    private final long maxOutstandingSplitsBytes;
 
     private final DataSize maxSplitSize;
     private final DataSize maxInitialSplitSize;
@@ -104,7 +102,8 @@ class HiveSplitSource
             ConnectorSession session,
             String databaseName,
             String tableName,
-            TupleDomain<? extends ColumnHandle> compactEffectivePredicate,
+            CacheQuotaScope cacheQuotaScope,
+            Optional<DataSize> configuredCacheQuota,
             PerBucket queues,
             int maxInitialSplits,
             DataSize maxOutstandingSplitsSize,
@@ -115,10 +114,11 @@ class HiveSplitSource
         requireNonNull(session, "session is null");
         this.queryId = session.getQueryId();
         this.databaseName = requireNonNull(databaseName, "databaseName is null");
+        this.cacheQuotaScope = requireNonNull(cacheQuotaScope, "tableCacheQuota is null");
+        this.configuredCacheQuota = requireNonNull(configuredCacheQuota, "configuredCacheQuota is null");
         this.tableName = requireNonNull(tableName, "tableName is null");
-        this.compactEffectivePredicate = requireNonNull(compactEffectivePredicate, "compactEffectivePredicate is null");
         this.queues = requireNonNull(queues, "queues is null");
-        this.maxOutstandingSplitsBytes = toIntExact(maxOutstandingSplitsSize.toBytes());
+        this.maxOutstandingSplitsBytes = requireNonNull(maxOutstandingSplitsSize, "maxOutstandingSplitsSize is null").toBytes();
         this.splitLoader = requireNonNull(splitLoader, "splitLoader is null");
         this.highMemorySplitSourceCounter = requireNonNull(highMemorySplitSourceCounter, "highMemorySplitSourceCounter is null");
 
@@ -132,7 +132,8 @@ class HiveSplitSource
             ConnectorSession session,
             String databaseName,
             String tableName,
-            TupleDomain<? extends ColumnHandle> compactEffectivePredicate,
+            CacheQuotaScope cacheQuotaScope,
+            Optional<DataSize> configuredCacheQuota,
             int maxInitialSplits,
             int maxOutstandingSplits,
             DataSize maxOutstandingSplitsSize,
@@ -144,7 +145,8 @@ class HiveSplitSource
                 session,
                 databaseName,
                 tableName,
-                compactEffectivePredicate,
+                cacheQuotaScope,
+                configuredCacheQuota,
                 new PerBucket()
                 {
                     private final AsyncQueue<InternalHiveSplit> queue = new AsyncQueue<>(maxOutstandingSplits, executor);
@@ -193,7 +195,8 @@ class HiveSplitSource
             ConnectorSession session,
             String databaseName,
             String tableName,
-            TupleDomain<? extends ColumnHandle> compactEffectivePredicate,
+            CacheQuotaScope cacheQuotaScope,
+            Optional<DataSize> configuredCacheQuota,
             int estimatedOutstandingSplitsPerBucket,
             int maxInitialSplits,
             DataSize maxOutstandingSplitsSize,
@@ -205,7 +208,8 @@ class HiveSplitSource
                 session,
                 databaseName,
                 tableName,
-                compactEffectivePredicate,
+                cacheQuotaScope,
+                configuredCacheQuota,
                 new PerBucket()
                 {
                     private final Map<Integer, AsyncQueue<InternalHiveSplit>> queues = new ConcurrentHashMap<>();
@@ -274,7 +278,8 @@ class HiveSplitSource
             ConnectorSession session,
             String databaseName,
             String tableName,
-            TupleDomain<? extends ColumnHandle> compactEffectivePredicate,
+            CacheQuotaScope cacheQuotaScope,
+            Optional<DataSize> configuredCacheQuota,
             int maxInitialSplits,
             DataSize maxOutstandingSplitsSize,
             HiveSplitLoader splitLoader,
@@ -285,7 +290,8 @@ class HiveSplitSource
                 session,
                 databaseName,
                 tableName,
-                compactEffectivePredicate,
+                cacheQuotaScope,
+                configuredCacheQuota,
                 new PerBucket()
                 {
                     @GuardedBy("this")
@@ -329,7 +335,8 @@ class HiveSplitSource
                     public boolean isFinished(OptionalInt bucketNumber)
                     {
                         checkArgument(bucketNumber.isPresent(), "bucketNumber must be present");
-                        return allSplitLoaded.isDone() && splits.get(bucketNumber.getAsInt()).stream().allMatch(InternalHiveSplit::isDone);
+                        // For virtual buckets, not all the buckets would exist, so we need to handle non-existent bucket.
+                        return allSplitLoaded.isDone() && (!splits.containsKey(bucketNumber.getAsInt()) || splits.get(bucketNumber.getAsInt()).stream().allMatch(InternalHiveSplit::isDone));
                     }
 
                     @Override
@@ -485,16 +492,19 @@ class HiveSplitSource
                         internalSplit.getStart(),
                         splitBytes,
                         internalSplit.getFileSize(),
-                        internalSplit.getSchema(),
+                        internalSplit.getPartitionInfo().getStorage(),
                         internalSplit.getPartitionKeys(),
                         block.getAddresses(),
                         internalSplit.getReadBucketNumber(),
                         internalSplit.getTableBucketNumber(),
-                        internalSplit.isForceLocalScheduling(),
-                        (TupleDomain<HiveColumnHandle>) compactEffectivePredicate,
-                        transformValues(internalSplit.getColumnCoercions(), HiveTypeName::toHiveType),
+                        internalSplit.getNodeSelectionStrategy(),
+                        internalSplit.getPartitionInfo().getPartitionDataColumnCount(),
+                        internalSplit.getPartitionSchemaDifference(),
                         internalSplit.getBucketConversion(),
-                        internalSplit.isS3SelectPushdownEnabled()));
+                        internalSplit.isS3SelectPushdownEnabled(),
+                        internalSplit.getExtraFileInfo(),
+                        new CacheQuotaRequirement(cacheQuotaScope, configuredCacheQuota),
+                        internalSplit.getEncryptionInformation()));
 
                 internalSplit.increaseStart(splitBytes);
 

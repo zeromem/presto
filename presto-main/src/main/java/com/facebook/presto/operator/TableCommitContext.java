@@ -14,37 +14,30 @@
 package com.facebook.presto.operator;
 
 import com.facebook.presto.execution.Lifespan;
+import com.facebook.presto.execution.TaskId;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
 public class TableCommitContext
 {
-    public enum CommitGranularity
-    {
-        PARTITION,
-        TABLE,
-    }
-
     private final Lifespan lifespan;
-    private final int stageId;
-    private final int taskId;
-    private final CommitGranularity commitGranularity;
+    private final TaskId taskId;
+    private final PageSinkCommitStrategy pageSinkCommitStrategy;
     private final boolean lastPage;
 
     @JsonCreator
     public TableCommitContext(
             @JsonProperty("lifespan") Lifespan lifespan,
-            @JsonProperty("stageId") int stageId,
-            @JsonProperty("taskId") int taskId,
-            @JsonProperty("commitGranularity") CommitGranularity commitGranularity,
+            @JsonProperty("taskId") TaskId taskId,
+            @JsonProperty("pageSinkCommitStrategy") PageSinkCommitStrategy pageSinkCommitStrategy,
             @JsonProperty("lastPage") boolean lastPage)
     {
         this.lifespan = requireNonNull(lifespan, "lifespan is null");
-        this.stageId = stageId;
-        this.taskId = taskId;
-        this.commitGranularity = requireNonNull(commitGranularity, "commitGranularity is null");
+        this.taskId = requireNonNull(taskId, "taskId is null");
+        this.pageSinkCommitStrategy = requireNonNull(pageSinkCommitStrategy, "pageSinkCommitStrategy is null");
         this.lastPage = lastPage;
     }
 
@@ -55,26 +48,31 @@ public class TableCommitContext
     }
 
     @JsonProperty
-    public int getStageId()
-    {
-        return stageId;
-    }
-
-    @JsonProperty
-    public int getTaskId()
+    public TaskId getTaskId()
     {
         return taskId;
     }
 
     @JsonProperty
-    public CommitGranularity getCommitGranularity()
+    public PageSinkCommitStrategy getPageSinkCommitStrategy()
     {
-        return commitGranularity;
+        return pageSinkCommitStrategy;
     }
 
     @JsonProperty
     public boolean isLastPage()
     {
         return lastPage;
+    }
+
+    @Override
+    public String toString()
+    {
+        return toStringHelper(this)
+                .add("lifespan", lifespan)
+                .add("taskId", taskId)
+                .add("pageSinkCommitStrategy", pageSinkCommitStrategy)
+                .add("lastPage", lastPage)
+                .toString();
     }
 }

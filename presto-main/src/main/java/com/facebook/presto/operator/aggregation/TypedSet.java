@@ -13,10 +13,10 @@
  */
 package com.facebook.presto.operator.aggregation;
 
+import com.facebook.presto.common.block.Block;
+import com.facebook.presto.common.block.BlockBuilder;
+import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.block.Block;
-import com.facebook.presto.spi.block.BlockBuilder;
-import com.facebook.presto.spi.type.Type;
 import com.google.common.annotations.VisibleForTesting;
 import io.airlift.units.DataSize;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -106,7 +106,7 @@ public class TypedSet
         }
     }
 
-    public void add(Block block, int position)
+    public boolean add(Block block, int position)
     {
         requireNonNull(block, "block must not be null");
         checkArgument(position >= 0, "position must be >= 0");
@@ -119,7 +119,24 @@ public class TypedSet
         int hashPosition = getHashPositionOfElement(block, position);
         if (blockPositionByHash.get(hashPosition) == EMPTY_SLOT) {
             addNewElement(hashPosition, block, position);
+            return true;
         }
+
+        return false;
+    }
+
+    public boolean addNonNull(Block block, int position)
+    {
+        requireNonNull(block, "block must not be null");
+        checkArgument(position >= 0, "position must be >= 0");
+
+        int hashPosition = getHashPositionOfElement(block, position);
+        if (blockPositionByHash.get(hashPosition) == EMPTY_SLOT) {
+            addNewElement(hashPosition, block, position);
+            return true;
+        }
+
+        return false;
     }
 
     public int size()

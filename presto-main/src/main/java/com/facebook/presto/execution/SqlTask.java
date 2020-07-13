@@ -13,6 +13,9 @@
  */
 package com.facebook.presto.execution;
 
+import com.facebook.airlift.concurrent.SetThreadName;
+import com.facebook.airlift.log.Logger;
+import com.facebook.airlift.stats.CounterStat;
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
 import com.facebook.presto.execution.buffer.BufferResult;
@@ -20,6 +23,7 @@ import com.facebook.presto.execution.buffer.LazyOutputBuffer;
 import com.facebook.presto.execution.buffer.OutputBuffer;
 import com.facebook.presto.execution.buffer.OutputBuffers;
 import com.facebook.presto.execution.buffer.OutputBuffers.OutputBufferId;
+import com.facebook.presto.execution.scheduler.TableWriteInfo;
 import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.operator.ExchangeClientSupplier;
 import com.facebook.presto.operator.PipelineContext;
@@ -34,9 +38,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import io.airlift.concurrent.SetThreadName;
-import io.airlift.log.Logger;
-import io.airlift.stats.CounterStat;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 import org.joda.time.DateTime;
@@ -46,7 +47,6 @@ import javax.annotation.Nullable;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -71,7 +71,7 @@ public class SqlTask
     private static final Logger log = Logger.get(SqlTask.class);
 
     private final TaskId taskId;
-    private final String taskInstanceId;
+    private final TaskInstanceId taskInstanceId;
     private final URI location;
     private final String nodeId;
     private final TaskStateMachine taskStateMachine;
@@ -123,7 +123,7 @@ public class SqlTask
             DataSize maxBufferSize)
     {
         this.taskId = requireNonNull(taskId, "taskId is null");
-        this.taskInstanceId = UUID.randomUUID().toString();
+        this.taskInstanceId = new TaskInstanceId(UUID.randomUUID());
         this.location = requireNonNull(location, "location is null");
         this.nodeId = requireNonNull(nodeId, "nodeId is null");
         this.queryContext = requireNonNull(queryContext, "queryContext is null");
@@ -135,7 +135,7 @@ public class SqlTask
         this.taskExchangeClientManager = new TaskExchangeClientManager(exchangeClientSupplier);
         outputBuffer = new LazyOutputBuffer(
                 taskId,
-                taskInstanceId,
+                taskInstanceId.getUuidString(),
                 taskNotificationExecutor,
                 maxBufferSize,
                 // Pass a memory context supplier instead of a memory context to the output buffer,
@@ -213,7 +213,7 @@ public class SqlTask
 
     public String getTaskInstanceId()
     {
-        return taskInstanceId;
+        return taskInstanceId.getUuidString();
     }
 
     public void recordHeartbeat()
@@ -283,22 +283,23 @@ public class SqlTask
             fullGcTime = taskContext.getFullGcTime();
         }
 
-        return new TaskStatus(taskStateMachine.getTaskId(),
-                taskInstanceId,
+        return new TaskStatus(
+                taskInstanceId.getUuidLeastSignificantBits(),
+                taskInstanceId.getUuidMostSignificantBits(),
                 versionNumber,
                 state,
                 location,
-                nodeId,
                 completedDriverGroups,
                 failures,
                 queuedPartitionedDrivers,
                 runningPartitionedDrivers,
+                outputBuffer.getUtilization(),
                 isOutputBufferOverutilized(),
-                physicalWrittenDataSize,
-                userMemoryReservation,
-                systemMemoryReservation,
+                physicalWrittenDataSize.toBytes(),
+                userMemoryReservation.toBytes(),
+                systemMemoryReservation.toBytes(),
                 fullGcCount,
-                fullGcTime);
+                fullGcTime.toMillis());
     }
 
     private TaskStats getTaskStats(TaskHolder taskHolder)
@@ -336,6 +337,7 @@ public class SqlTask
 
         TaskStatus taskStatus = createTaskStatus(taskHolder);
         return new TaskInfo(
+                taskStateMachine.getTaskId(),
                 taskStatus,
                 lastHeartbeat.get(),
                 outputBuffer.getInfo(),
@@ -372,7 +374,12 @@ public class SqlTask
         return Futures.transform(futureTaskState, input -> getTaskInfo(), directExecutor());
     }
 
-    public TaskInfo updateTask(Session session, Optional<PlanFragment> fragment, List<TaskSource> sources, OutputBuffers outputBuffers, OptionalInt totalPartitions)
+    public TaskInfo updateTask(
+            Session session,
+            Optional<PlanFragment> fragment,
+            List<TaskSource> sources,
+            OutputBuffers outputBuffers,
+            Optional<TableWriteInfo> tableWriteInfo)
     {
         try {
             // The LazyOutput buffer does not support write methods, so the actual
@@ -391,6 +398,7 @@ public class SqlTask
                 taskExecution = taskHolder.getTaskExecution();
                 if (taskExecution == null) {
                     checkState(fragment.isPresent(), "fragment must be present");
+                    checkState(tableWriteInfo.isPresent(), "tableWriteInfo must be present");
                     taskExecution = sqlTaskExecutionFactory.create(
                             session,
                             queryContext,
@@ -399,7 +407,7 @@ public class SqlTask
                             taskExchangeClientManager,
                             fragment.get(),
                             sources,
-                            totalPartitions);
+                            tableWriteInfo.get());
                     taskHolderReference.compareAndSet(taskHolder, new TaskHolder(taskExecution));
                     needsPlan.set(false);
                 }
@@ -553,5 +561,35 @@ public class SqlTask
     public QueryContext getQueryContext()
     {
         return queryContext;
+    }
+
+    private static class TaskInstanceId
+    {
+        private final long uuidLeastSignificantBits;
+        private final long uuidMostSignificantBits;
+        private final String uuidString;
+
+        public TaskInstanceId(UUID uuid)
+        {
+            requireNonNull(uuid, "uuid is null");
+            this.uuidLeastSignificantBits = uuid.getLeastSignificantBits();
+            this.uuidMostSignificantBits = uuid.getMostSignificantBits();
+            this.uuidString = uuid.toString();
+        }
+
+        public long getUuidLeastSignificantBits()
+        {
+            return uuidLeastSignificantBits;
+        }
+
+        public long getUuidMostSignificantBits()
+        {
+            return uuidMostSignificantBits;
+        }
+
+        public String getUuidString()
+        {
+            return uuidString;
+        }
     }
 }

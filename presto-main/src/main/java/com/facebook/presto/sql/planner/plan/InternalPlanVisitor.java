@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.planner.plan;
 
+import com.facebook.presto.spi.plan.PlanVisitor;
 import com.facebook.presto.sql.planner.iterative.GroupReference;
 
 public abstract class InternalPlanVisitor<R, C>
@@ -23,32 +24,7 @@ public abstract class InternalPlanVisitor<R, C>
         return visitPlan(node, context);
     }
 
-    public R visitAggregation(AggregationNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitProject(ProjectNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitTopN(TopNNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
     public R visitOutput(OutputNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitLimit(LimitNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitDistinctLimit(DistinctLimitNode node, C context)
     {
         return visitPlan(node, context);
     }
@@ -59,11 +35,6 @@ public abstract class InternalPlanVisitor<R, C>
     }
 
     public R visitExplainAnalyze(ExplainAnalyzeNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitValues(ValuesNode node, C context)
     {
         return visitPlan(node, context);
     }
@@ -108,6 +79,11 @@ public abstract class InternalPlanVisitor<R, C>
         return visitPlan(node, context);
     }
 
+    public R visitTableWriteMerge(TableWriterMergeNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
+
     public R visitDelete(DeleteNode node, C context)
     {
         return visitPlan(node, context);
@@ -128,27 +104,7 @@ public abstract class InternalPlanVisitor<R, C>
         return visitPlan(node, context);
     }
 
-    public R visitUnion(UnionNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitIntersect(IntersectNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitExcept(ExceptNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
     public R visitUnnest(UnnestNode node, C context)
-    {
-        return visitPlan(node, context);
-    }
-
-    public R visitMarkDistinct(MarkDistinctNode node, C context)
     {
         return visitPlan(node, context);
     }

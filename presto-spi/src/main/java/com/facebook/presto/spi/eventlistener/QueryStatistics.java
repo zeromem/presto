@@ -22,10 +22,12 @@ import static java.util.Objects.requireNonNull;
 public class QueryStatistics
 {
     private final Duration cpuTime;
+    private final Duration retriedCpuTime;
     private final Duration wallTime;
     private final Duration queuedTime;
     private final Optional<Duration> analysisTime;
 
+    private final int peakRunningTasks;
     private final long peakUserMemoryBytes;
     // peak of user + system memory
     private final long peakTotalNonRevocableMemoryBytes;
@@ -46,15 +48,18 @@ public class QueryStatistics
     private final int completedSplits;
     private final boolean complete;
 
-    private final List<StageCpuDistribution> cpuTimeDistribution;
+    private final List<ResourceDistribution> cpuTimeDistribution;
+    private final List<ResourceDistribution> peakMemoryDistribution;
 
     private final List<String> operatorSummaries;
 
     public QueryStatistics(
             Duration cpuTime,
+            Duration retriedCpuTime,
             Duration wallTime,
             Duration queuedTime,
             Optional<Duration> analysisTime,
+            int peakRunningTasks,
             long peakUserMemoryBytes,
             long peakTotalNonRevocableMemoryBytes,
             long peakTaskUserMemory,
@@ -70,13 +75,16 @@ public class QueryStatistics
             List<StageGcStatistics> stageGcStatistics,
             int completedSplits,
             boolean complete,
-            List<StageCpuDistribution> cpuTimeDistribution,
+            List<ResourceDistribution> cpuTimeDistribution,
+            List<ResourceDistribution> peakMemoryDistribution,
             List<String> operatorSummaries)
     {
         this.cpuTime = requireNonNull(cpuTime, "cpuTime is null");
+        this.retriedCpuTime = requireNonNull(retriedCpuTime, "retriedCpuTime is null");
         this.wallTime = requireNonNull(wallTime, "wallTime is null");
         this.queuedTime = requireNonNull(queuedTime, "queuedTime is null");
         this.analysisTime = requireNonNull(analysisTime, "analysisTime is null");
+        this.peakRunningTasks = peakRunningTasks;
         this.peakUserMemoryBytes = peakUserMemoryBytes;
         this.peakTotalNonRevocableMemoryBytes = peakTotalNonRevocableMemoryBytes;
         this.peakTaskUserMemory = peakTaskUserMemory;
@@ -93,12 +101,18 @@ public class QueryStatistics
         this.completedSplits = completedSplits;
         this.complete = complete;
         this.cpuTimeDistribution = requireNonNull(cpuTimeDistribution, "cpuTimeDistribution is null");
+        this.peakMemoryDistribution = requireNonNull(peakMemoryDistribution, "peakMemoryDistribution is null");
         this.operatorSummaries = requireNonNull(operatorSummaries, "operatorSummaries is null");
     }
 
     public Duration getCpuTime()
     {
         return cpuTime;
+    }
+
+    public Duration getRetriedCpuTime()
+    {
+        return retriedCpuTime;
     }
 
     public Duration getWallTime()
@@ -114,6 +128,11 @@ public class QueryStatistics
     public Optional<Duration> getAnalysisTime()
     {
         return analysisTime;
+    }
+
+    public int getPeakRunningTasks()
+    {
+        return peakRunningTasks;
     }
 
     public long getPeakUserMemoryBytes()
@@ -191,9 +210,14 @@ public class QueryStatistics
         return complete;
     }
 
-    public List<StageCpuDistribution> getCpuTimeDistribution()
+    public List<ResourceDistribution> getCpuTimeDistribution()
     {
         return cpuTimeDistribution;
+    }
+
+    public List<ResourceDistribution> getPeakMemoryDistribution()
+    {
+        return peakMemoryDistribution;
     }
 
     public List<String> getOperatorSummaries()

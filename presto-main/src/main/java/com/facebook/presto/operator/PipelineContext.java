@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.airlift.stats.CounterStat;
+import com.facebook.airlift.stats.Distribution;
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.Lifespan;
 import com.facebook.presto.execution.TaskId;
@@ -25,8 +27,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ListenableFuture;
-import io.airlift.stats.CounterStat;
-import io.airlift.stats.Distribution;
 import org.joda.time.DateTime;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -82,6 +82,8 @@ public class PipelineContext
     private final AtomicLong totalScheduledTime = new AtomicLong();
     private final AtomicLong totalCpuTime = new AtomicLong();
     private final AtomicLong totalBlockedTime = new AtomicLong();
+
+    private final AtomicLong totalAllocation = new AtomicLong();
 
     private final CounterStat rawInputDataSize = new CounterStat();
     private final CounterStat rawInputPositions = new CounterStat();
@@ -188,22 +190,12 @@ public class PipelineContext
 
         totalBlockedTime.getAndAdd(driverStats.getTotalBlockedTime().roundTo(NANOSECONDS));
 
+        totalAllocation.getAndAdd(driverStats.getTotalAllocation().toBytes());
+
         // merge the operator stats into the operator summary
         List<OperatorStats> operators = driverStats.getOperatorStats();
         for (OperatorStats operator : operators) {
-            // TODO: replace with ConcurrentMap.compute() when we migrate to java 8
-            OperatorStats updated;
-            OperatorStats current;
-            do {
-                current = operatorSummaries.get(operator.getOperatorId());
-                if (current != null) {
-                    updated = current.add(operator);
-                }
-                else {
-                    updated = operator;
-                }
-            }
-            while (!compareAndSet(operatorSummaries, operator.getOperatorId(), current, updated));
+            operatorSummaries.compute(operator.getOperatorId(), (operatorId, summaryStats) -> summaryStats == null ? operator : summaryStats.add(operator));
         }
 
         rawInputDataSize.update(driverStats.getRawInputDataSize().toBytes());
@@ -267,6 +259,16 @@ public class PipelineContext
     public boolean isCpuTimerEnabled()
     {
         return taskContext.isCpuTimerEnabled();
+    }
+
+    public boolean isPerOperatorAllocationTrackingEnabled()
+    {
+        return taskContext.isPerOperatorAllocationTrackingEnabled();
+    }
+
+    public boolean isAllocationTrackingEnabled()
+    {
+        return taskContext.isAllocationTrackingEnabled();
     }
 
     public CounterStat getInputDataSize()
@@ -345,6 +347,8 @@ public class PipelineContext
         long totalCpuTime = this.totalCpuTime.get();
         long totalBlockedTime = this.totalBlockedTime.get();
 
+        long totalAllocation = this.totalAllocation.get();
+
         long rawInputDataSize = this.rawInputDataSize.getTotalCount();
         long rawInputPositions = this.rawInputPositions.getTotalCount();
 
@@ -369,6 +373,8 @@ public class PipelineContext
             totalScheduledTime += driverStats.getTotalScheduledTime().roundTo(NANOSECONDS);
             totalCpuTime += driverStats.getTotalCpuTime().roundTo(NANOSECONDS);
             totalBlockedTime += driverStats.getTotalBlockedTime().roundTo(NANOSECONDS);
+
+            totalAllocation += driverStats.getTotalAllocation().toBytes();
 
             List<OperatorStats> operators = ImmutableList.copyOf(transform(driverContext.getOperatorContexts(), OperatorContext::getOperatorStats));
             for (OperatorStats operator : operators) {
@@ -440,6 +446,8 @@ public class PipelineContext
                 fullyBlocked,
                 blockedReasons,
 
+                succinctBytes(totalAllocation),
+
                 succinctBytes(rawInputDataSize),
                 rawInputPositions,
 
@@ -465,15 +473,6 @@ public class PipelineContext
         return drivers.stream()
                 .map(driver -> driver.accept(visitor, context))
                 .collect(toList());
-    }
-
-    private static <K, V> boolean compareAndSet(ConcurrentMap<K, V> map, K key, V oldValue, V newValue)
-    {
-        if (oldValue == null) {
-            return map.putIfAbsent(key, newValue) == null;
-        }
-
-        return map.replace(key, oldValue, newValue);
     }
 
     @VisibleForTesting

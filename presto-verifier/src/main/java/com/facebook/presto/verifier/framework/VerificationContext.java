@@ -13,44 +13,49 @@
  */
 package com.facebook.presto.verifier.framework;
 
-import com.facebook.presto.jdbc.QueryStats;
-import com.facebook.presto.verifier.event.FailureInfo;
-import com.facebook.presto.verifier.framework.QueryOrigin.TargetCluster;
+import com.facebook.presto.verifier.event.QueryFailure;
 
-import java.util.EnumMap;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
-import static com.facebook.presto.verifier.framework.QueryOrigin.TargetCluster.CONTROL;
-import static com.facebook.presto.verifier.framework.QueryOrigin.TargetCluster.TEST;
-import static com.google.common.base.Throwables.getStackTraceAsString;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 
 public class VerificationContext
 {
-    private Map<TargetCluster, Set<QueryException>> failures = new EnumMap<>(TargetCluster.class);
+    private final int resubmissionCount;
+    private final Set<QueryException> queryExceptions;
 
-    public VerificationContext()
+    private VerificationContext(int resubmissionCount, Set<QueryException> queryExceptions)
     {
-        failures.put(CONTROL, new LinkedHashSet<>());
-        failures.put(TEST, new LinkedHashSet<>());
+        this.resubmissionCount = resubmissionCount;
+        this.queryExceptions = new HashSet<>(queryExceptions);
     }
 
-    public void recordFailure(QueryException exception)
+    public static VerificationContext create()
     {
-        failures.get(exception.getQueryOrigin().getCluster()).add(exception);
+        return new VerificationContext(0, new HashSet<>());
     }
 
-    public List<FailureInfo> getAllFailures(TargetCluster cluster)
+    public static VerificationContext createForResubmission(VerificationContext existing)
     {
-        return failures.get(cluster).stream()
-                .map(exception -> new FailureInfo(
-                        exception.getQueryOrigin().getStage(),
-                        exception.getErrorCode(),
-                        exception.getQueryStats().map(QueryStats::getQueryId),
-                        getStackTraceAsString(exception)))
+        return new VerificationContext(existing.resubmissionCount + 1, existing.queryExceptions);
+    }
+
+    public int getResubmissionCount()
+    {
+        return resubmissionCount;
+    }
+
+    public void addException(QueryException exception)
+    {
+        queryExceptions.add(exception);
+    }
+
+    public List<QueryFailure> getQueryFailures()
+    {
+        return queryExceptions.stream()
+                .map(QueryException::toQueryFailure)
                 .collect(toImmutableList());
     }
 }

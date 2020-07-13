@@ -13,10 +13,13 @@
  */
 package com.facebook.presto.spi.function;
 
-import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.common.function.OperatorType;
+import com.facebook.presto.common.function.QualifiedFunctionName;
+import com.facebook.presto.common.type.TypeSignature;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Collections.unmodifiableList;
@@ -24,23 +27,27 @@ import static java.util.Objects.requireNonNull;
 
 public class FunctionMetadata
 {
-    private final String name;
+    private final QualifiedFunctionName name;
     private final Optional<OperatorType> operatorType;
     private final List<TypeSignature> argumentTypes;
+    private final Optional<List<String>> argumentNames;
     private final TypeSignature returnType;
     private final FunctionKind functionKind;
+    private final FunctionImplementationType implementationType;
     private final boolean deterministic;
     private final boolean calledOnNullInput;
 
     public FunctionMetadata(
-            String name,
+            QualifiedFunctionName name,
             List<TypeSignature> argumentTypes,
+            Optional<List<String>> argumentNames,
             TypeSignature returnType,
             FunctionKind functionKind,
+            FunctionImplementationType implementationType,
             boolean deterministic,
             boolean calledOnNullInput)
     {
-        this(name, Optional.empty(), argumentTypes, returnType, functionKind, deterministic, calledOnNullInput);
+        this(name, Optional.empty(), argumentTypes, argumentNames, returnType, functionKind, implementationType, deterministic, calledOnNullInput);
     }
 
     public FunctionMetadata(
@@ -48,26 +55,31 @@ public class FunctionMetadata
             List<TypeSignature> argumentTypes,
             TypeSignature returnType,
             FunctionKind functionKind,
+            FunctionImplementationType implementationType,
             boolean deterministic,
             boolean calledOnNullInput)
     {
-        this(operatorType.getFunctionName(), Optional.of(operatorType), argumentTypes, returnType, functionKind, deterministic, calledOnNullInput);
+        this(operatorType.getFunctionName(), Optional.of(operatorType), argumentTypes, Optional.empty(), returnType, functionKind, implementationType, deterministic, calledOnNullInput);
     }
 
     private FunctionMetadata(
-            String name,
+            QualifiedFunctionName name,
             Optional<OperatorType> operatorType,
             List<TypeSignature> argumentTypes,
+            Optional<List<String>> argumentNames,
             TypeSignature returnType,
             FunctionKind functionKind,
+            FunctionImplementationType implementationType,
             boolean deterministic,
             boolean calledOnNullInput)
     {
         this.name = requireNonNull(name, "name is null");
         this.operatorType = requireNonNull(operatorType, "operatorType is null");
         this.argumentTypes = unmodifiableList(new ArrayList<>(requireNonNull(argumentTypes, "argumentTypes is null")));
+        this.argumentNames = requireNonNull(argumentNames, "argumentNames is null").map(names -> unmodifiableList(new ArrayList<>(names)));
         this.returnType = requireNonNull(returnType, "returnType is null");
         this.functionKind = requireNonNull(functionKind, "functionKind is null");
+        this.implementationType = requireNonNull(implementationType, "language is null");
         this.deterministic = deterministic;
         this.calledOnNullInput = calledOnNullInput;
     }
@@ -77,7 +89,7 @@ public class FunctionMetadata
         return functionKind;
     }
 
-    public String getName()
+    public QualifiedFunctionName getName()
     {
         return name;
     }
@@ -85,6 +97,11 @@ public class FunctionMetadata
     public List<TypeSignature> getArgumentTypes()
     {
         return argumentTypes;
+    }
+
+    public Optional<List<String>> getArgumentNames()
+    {
+        return argumentNames;
     }
 
     public TypeSignature getReturnType()
@@ -97,6 +114,11 @@ public class FunctionMetadata
         return operatorType;
     }
 
+    public FunctionImplementationType getImplementationType()
+    {
+        return implementationType;
+    }
+
     public boolean isDeterministic()
     {
         return deterministic;
@@ -105,5 +127,32 @@ public class FunctionMetadata
     public boolean isCalledOnNullInput()
     {
         return calledOnNullInput;
+    }
+
+    @Override
+    public boolean equals(Object obj)
+    {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        FunctionMetadata other = (FunctionMetadata) obj;
+        return Objects.equals(this.name, other.name) &&
+                Objects.equals(this.operatorType, other.operatorType) &&
+                Objects.equals(this.argumentTypes, other.argumentTypes) &&
+                Objects.equals(this.argumentNames, other.argumentNames) &&
+                Objects.equals(this.returnType, other.returnType) &&
+                Objects.equals(this.functionKind, other.functionKind) &&
+                Objects.equals(this.implementationType, other.implementationType) &&
+                Objects.equals(this.deterministic, other.deterministic) &&
+                Objects.equals(this.calledOnNullInput, other.calledOnNullInput);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(name, operatorType, argumentTypes, argumentNames, returnType, functionKind, implementationType, deterministic, calledOnNullInput);
     }
 }

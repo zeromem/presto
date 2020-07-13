@@ -14,20 +14,26 @@
 package com.facebook.presto.metadata;
 
 import com.facebook.presto.Session;
-import com.facebook.presto.connector.ConnectorId;
-import com.facebook.presto.spi.CatalogSchemaName;
+import com.facebook.presto.common.CatalogSchemaName;
+import com.facebook.presto.common.block.BlockEncodingSerde;
+import com.facebook.presto.common.predicate.TupleDomain;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.common.type.TypeManager;
+import com.facebook.presto.common.type.TypeSignature;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SystemTable;
-import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.TableHandle;
+import com.facebook.presto.spi.api.Experimental;
 import com.facebook.presto.spi.connector.ConnectorCapabilities;
 import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.connector.ConnectorPartitioningHandle;
-import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.function.SqlFunction;
 import com.facebook.presto.spi.security.GrantInfo;
 import com.facebook.presto.spi.security.PrestoPrincipal;
 import com.facebook.presto.spi.security.Privilege;
@@ -35,10 +41,8 @@ import com.facebook.presto.spi.security.RoleGrant;
 import com.facebook.presto.spi.statistics.ComputedStatistics;
 import com.facebook.presto.spi.statistics.TableStatistics;
 import com.facebook.presto.spi.statistics.TableStatisticsMetadata;
-import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.TypeManager;
-import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.planner.PartitioningHandle;
+import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.slice.Slice;
 
 import java.util.Collection;
@@ -54,9 +58,9 @@ public interface Metadata
 
     Type getType(TypeSignature signature);
 
-    List<SqlFunction> listFunctions();
+    List<SqlFunction> listFunctions(Session session);
 
-    void addFunctions(List<? extends SqlFunction> functions);
+    void registerBuiltInFunctions(List<? extends SqlFunction> functions);
 
     boolean schemaExists(Session session, CatalogSchemaName schema);
 
@@ -75,14 +79,14 @@ public interface Metadata
 
     /**
      * Returns a new table layout that satisfies the given constraint together with unenforced constraint.
-     * @apiNote This method is unstable and subject to change in the future.
      */
+    @Experimental
     TableLayoutResult getLayout(Session session, TableHandle tableHandle, Constraint<ColumnHandle> constraint, Optional<Set<ColumnHandle>> desiredColumns);
 
     /**
      * Returns table's layout properties for a given table handle.
-     * @apiNote This method is unstable and subject to change in the future.
      */
+    @Experimental
     TableLayout getLayout(Session session, TableHandle handle);
 
     /**
@@ -93,6 +97,14 @@ public interface Metadata
      * as promised by {@link #getCommonPartitioning}.
      */
     TableHandle getAlternativeTableHandle(Session session, TableHandle tableHandle, PartitioningHandle partitioningHandle);
+
+    /**
+     * Experimental: if true, the engine will invoke getLayout otherwise, getLayout will not be called.
+     * If filter pushdown is required, use a ConnectorPlanOptimizer in the respective connector in order
+     * to push compute into it's TableScan.
+     */
+    @Deprecated
+    boolean isLegacyGetLayoutSupported(Session session, TableHandle tableHandle);
 
     /**
      * Return a partitioning handle which the connector can transparently convert both {@code left} and {@code right} into.
@@ -107,9 +119,8 @@ public interface Metadata
      * for details about refined partitioning.
      * <p>
      * Refined-over relation is reflexive.
-     * <p>
-     * This SPI is unstable and subject to change in the future.
      */
+    @Experimental
     boolean isRefinedPartitioningOver(Session session, PartitioningHandle a, PartitioningHandle b);
 
     /**
@@ -127,9 +138,9 @@ public interface Metadata
     TableMetadata getTableMetadata(Session session, TableHandle tableHandle);
 
     /**
-     * Return statistics for specified table for given filtering contraint.
+     * Return statistics for specified table for given columns and filtering constraint.
      */
-    TableStatistics getTableStatistics(Session session, TableHandle tableHandle, Constraint<ColumnHandle> constraint);
+    TableStatistics getTableStatistics(Session session, TableHandle tableHandle, List<ColumnHandle> columnHandles, Constraint<ColumnHandle> constraint);
 
     /**
      * Get the names that match the specified table prefix (never null).
@@ -149,6 +160,11 @@ public interface Metadata
      * @throws RuntimeException if table or column handles are no longer valid
      */
     ColumnMetadata getColumnMetadata(Session session, TableHandle tableHandle, ColumnHandle columnHandle);
+
+    /**
+     * Returns a TupleDomain of constraints that is suitable for ExplainIO
+     */
+    TupleDomain<ColumnHandle> toExplainIOConstraints(Session session, TableHandle tableHandle, TupleDomain<ColumnHandle> constraints);
 
     /**
      * Gets the metadata for all columns that match the specified table prefix.
@@ -181,9 +197,8 @@ public interface Metadata
      * Creates a temporary table with optional partitioning requirements.
      * Temporary table might have different default storage format, compression scheme, replication factor, etc,
      * and gets automatically dropped when the transaction ends.
-     *
-     * This SPI is unstable and subject to change in the future.
      */
+    @Experimental
     TableHandle createTemporaryTable(Session session, String catalogName, List<ColumnMetadata> columns, Optional<PartitioningMetadata> partitioningMetadata);
 
     /**
@@ -215,6 +230,9 @@ public interface Metadata
 
     Optional<NewTableLayout> getNewTableLayout(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
 
+    @Experimental
+    Optional<NewTableLayout> getPreferredShuffleLayoutForNewTable(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
+
     /**
      * Begin the atomic creation of a table with data.
      */
@@ -226,6 +244,9 @@ public interface Metadata
     Optional<ConnectorOutputMetadata> finishCreateTable(Session session, OutputTableHandle tableHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics);
 
     Optional<NewTableLayout> getInsertLayout(Session session, TableHandle target);
+
+    @Experimental
+    Optional<NewTableLayout> getPreferredShuffleLayoutForInsert(Session session, TableHandle target);
 
     /**
      * Describes statistics that must be collected during a write.
@@ -325,7 +346,7 @@ public interface Metadata
     /**
      * Creates the specified view with the specified view definition.
      */
-    void createView(Session session, QualifiedObjectName viewName, String viewData, boolean replace);
+    void createView(Session session, String catalogName, ConnectorTableMetadata viewMetadata, String viewData, boolean replace);
 
     /**
      * Drops the specified view.
@@ -399,16 +420,16 @@ public interface Metadata
     List<GrantInfo> listTablePrivileges(Session session, QualifiedTablePrefix prefix);
 
     /**
-     * Commits partition for table creation.
-     * @apiNote This method is unstable and subject to change in the future.
+     * Commits page sink for table creation.
      */
-    void commitPartition(Session session, OutputTableHandle tableHandle, int partitionId, Collection<Slice> fragments);
+    @Experimental
+    ListenableFuture<Void> commitPageSinkAsync(Session session, OutputTableHandle tableHandle, Collection<Slice> fragments);
 
     /**
-     * Commits partition for table insertion.
-     * @apiNote This method is unstable and subject to change in the future.
+     * Commits page sink for table insertion.
      */
-    void commitPartition(Session session, InsertTableHandle tableHandle, int partitionId, Collection<Slice> fragments);
+    @Experimental
+    ListenableFuture<Void> commitPageSinkAsync(Session session, InsertTableHandle tableHandle, Collection<Slice> fragments);
 
     FunctionManager getFunctionManager();
 

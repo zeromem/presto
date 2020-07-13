@@ -13,9 +13,9 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.common.Page;
 import com.facebook.presto.hive.PartitionUpdate.FileWriteInfo;
 import com.facebook.presto.hive.PartitionUpdate.UpdateMode;
-import com.facebook.presto.spi.Page;
 import com.google.common.collect.ImmutableList;
 
 import java.util.Optional;
@@ -122,7 +122,7 @@ public class HiveWriter
         return toStringHelper(this)
                 .add("fileWriter", fileWriter)
                 .add("writeFilePath", writePath + "/" + fileWriteInfo.getWriteFileName())
-                .add("targetFilePath", writePath + "/" + fileWriteInfo.getTargetFileName())
+                .add("targetFilePath", targetPath + "/" + fileWriteInfo.getTargetFileName())
                 .toString();
     }
 }

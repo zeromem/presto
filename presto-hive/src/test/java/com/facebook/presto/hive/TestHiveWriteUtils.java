@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.hive;
 
-import com.facebook.presto.hive.HdfsEnvironment.HdfsContext;
 import org.apache.hadoop.fs.Path;
 import org.testng.annotations.Test;
 
@@ -31,7 +30,7 @@ public class TestHiveWriteUtils
     @Test
     public void testIsS3FileSystem()
     {
-        HdfsEnvironment hdfsEnvironment = createTestHdfsEnvironment(new HiveClientConfig());
+        HdfsEnvironment hdfsEnvironment = createTestHdfsEnvironment(new HiveClientConfig(), new MetastoreClientConfig());
         assertTrue(isS3FileSystem(CONTEXT, hdfsEnvironment, new Path("s3://test-bucket/test-folder")));
         assertFalse(isS3FileSystem(CONTEXT, hdfsEnvironment, new Path("/test-dir/test-folder")));
     }
@@ -39,7 +38,7 @@ public class TestHiveWriteUtils
     @Test
     public void testIsViewFileSystem()
     {
-        HdfsEnvironment hdfsEnvironment = createTestHdfsEnvironment(new HiveClientConfig());
+        HdfsEnvironment hdfsEnvironment = createTestHdfsEnvironment(new HiveClientConfig(), new MetastoreClientConfig());
         Path viewfsPath = new Path("viewfs://ns-default/test-folder");
         Path nonViewfsPath = new Path("hdfs://localhost/test-dir/test-folder");
 

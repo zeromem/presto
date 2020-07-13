@@ -14,7 +14,9 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.hive.HiveSplit.BucketConversion;
+import com.facebook.presto.hive.metastore.Column;
 import com.facebook.presto.spi.HostAddress;
+import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
 import com.google.common.collect.ImmutableList;
 import org.apache.hadoop.fs.Path;
 import org.openjdk.jol.info.ClassLayout;
@@ -25,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.Properties;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -59,9 +60,11 @@ public class InternalHiveSplit
     private final int tableBucketNumber;
 
     private final boolean splittable;
-    private final boolean forceLocalScheduling;
+    private final NodeSelectionStrategy nodeSelectionStrategy;
     private final boolean s3SelectPushdownEnabled;
     private final HiveSplitPartitionInfo partitionInfo;
+    private final Optional<byte[]> extraFileInfo;
+    private final Optional<EncryptionInformation> encryptionInformation;
 
     private long start;
     private int currentBlockIndex;
@@ -75,9 +78,11 @@ public class InternalHiveSplit
             OptionalInt readBucketNumber,
             OptionalInt tableBucketNumber,
             boolean splittable,
-            boolean forceLocalScheduling,
+            NodeSelectionStrategy nodeSelectionStrategy,
             boolean s3SelectPushdownEnabled,
-            HiveSplitPartitionInfo partitionInfo)
+            HiveSplitPartitionInfo partitionInfo,
+            Optional<byte[]> extraFileInfo,
+            Optional<EncryptionInformation> encryptionInformation)
     {
         checkArgument(start >= 0, "start must be positive");
         checkArgument(end >= 0, "end must be positive");
@@ -85,7 +90,10 @@ public class InternalHiveSplit
         requireNonNull(relativeUri, "relativeUri is null");
         requireNonNull(readBucketNumber, "readBucketNumber is null");
         requireNonNull(tableBucketNumber, "tableBucketNumber is null");
+        requireNonNull(nodeSelectionStrategy, "nodeSelectionStrategy is null");
         requireNonNull(partitionInfo, "partitionInfo is null");
+        requireNonNull(extraFileInfo, "extraFileInfo is null");
+        requireNonNull(encryptionInformation, "encryptionInformation is null");
 
         this.relativeUri = relativeUri.getBytes(UTF_8);
         this.start = start;
@@ -94,9 +102,10 @@ public class InternalHiveSplit
         this.readBucketNumber = readBucketNumber.orElse(-1);
         this.tableBucketNumber = tableBucketNumber.orElse(-1);
         this.splittable = splittable;
-        this.forceLocalScheduling = forceLocalScheduling;
+        this.nodeSelectionStrategy = nodeSelectionStrategy;
         this.s3SelectPushdownEnabled = s3SelectPushdownEnabled;
         this.partitionInfo = partitionInfo;
+        this.extraFileInfo = extraFileInfo;
 
         ImmutableList.Builder<List<HostAddress>> addressesBuilder = ImmutableList.builder();
         blockEndOffsets = new long[blocks.size()];
@@ -109,6 +118,7 @@ public class InternalHiveSplit
             blockEndOffsets[i] = block.getEnd();
         }
         blockAddresses = allAddressesEmpty ? ImmutableList.of() : addressesBuilder.build();
+        this.encryptionInformation = encryptionInformation;
     }
 
     public String getPath()
@@ -137,11 +147,6 @@ public class InternalHiveSplit
         return s3SelectPushdownEnabled;
     }
 
-    public Properties getSchema()
-    {
-        return partitionInfo.getSchema();
-    }
-
     public List<HivePartitionKey> getPartitionKeys()
     {
         return partitionInfo.getPartitionKeys();
@@ -167,14 +172,14 @@ public class InternalHiveSplit
         return splittable;
     }
 
-    public boolean isForceLocalScheduling()
+    public NodeSelectionStrategy getNodeSelectionStrategy()
     {
-        return forceLocalScheduling;
+        return nodeSelectionStrategy;
     }
 
-    public Map<Integer, HiveTypeName> getColumnCoercions()
+    public Map<Integer, Column> getPartitionSchemaDifference()
     {
-        return partitionInfo.getColumnCoercions();
+        return partitionInfo.getPartitionSchemaDifference();
     }
 
     public Optional<BucketConversion> getBucketConversion()
@@ -207,6 +212,16 @@ public class InternalHiveSplit
         return partitionInfo;
     }
 
+    public Optional<byte[]> getExtraFileInfo()
+    {
+        return extraFileInfo;
+    }
+
+    public Optional<EncryptionInformation> getEncryptionInformation()
+    {
+        return this.encryptionInformation;
+    }
+
     public void reset()
     {
         currentBlockIndex = 0;
@@ -231,6 +246,9 @@ public class InternalHiveSplit
                     result += HOST_ADDRESS_INSTANCE_SIZE + address.getHostText().length() * Character.BYTES;
                 }
             }
+        }
+        if (extraFileInfo.isPresent()) {
+            result += sizeOf(extraFileInfo.get());
         }
         return result;
     }
